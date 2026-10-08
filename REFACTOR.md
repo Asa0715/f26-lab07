@@ -54,10 +54,40 @@ would go red.
 
 ### The directive
 
-**The refactor and the exact directive.** Name the refactor (one from the menu
-in the handout) and paste the directive you gave the agent, including the scope
-you set, meaning which files and packages were in bounds, which were not, and
-one line on why the boundary sits where it does.
+**The refactor and the exact directive.** 
+
+Refactor: Replace Conditional with Polymorphism in
+`src/main/java/edu/cmu/cs214/scheduling/workflow/BookingWorkflow.java`.
+
+Remove the BookingType switch from all four methods (submit, cancel, priceOf,
+describe). Add a package-private BookingHandler interface and three
+implementations (Regular/Recurring/BlockedBookingHandler) in the workflow
+package, and move each case body into its handler verbatim. BookingWorkflow
+picks the handler from an EnumMap built in its constructor; that is the only
+place a type maps to behavior. Keep the shared checks and the current
+default-branch results in BookingWorkflow. Public signatures do not change.
+
+This is a move, not a fix. Behavior must stay identical, including:
+- RECURRING's overlap check uses `<=`; REGULAR and BLOCKED use `<`. Keep both,
+  and do not merge them into a shared helper.
+- Every message string, notification (recipient, subject, body, count, order),
+  and store call order (nextSeriesId before the weekly loop) stays the same.
+- Cancel and price semantics stay the same. RECURRING cancels this occurrence
+  and later ones. BLOCKED needs adminOverride. RECURRING priceOf sums the
+  series.
+
+Scope
+In: BookingWorkflow.java, plus new files in the workflow/ package.
+Out: domain/ (including BookingType; no behavior on the enum), notify/,
+pricing/, reporting/, all of src/test/, pom.xml, .github/, and the *.md files.
+Why: the smell lives only in BookingWorkflow; everything else is the contract
+its callers and tests rely on, or belongs to a later milestone, and the tests
+are the check, so they cannot change with the code.
+If you think something out of scope must change, stop and ask.
+
+Done: `mvn -B test` shows 36 tests, all green, with no test files changed;
+there is no `switch` left in workflow/; nothing is committed. List the files
+you touched.
 
 ### The result
 
