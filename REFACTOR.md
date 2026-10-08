@@ -91,27 +91,102 @@ you touched.
 
 ### The result
 
-**The diff and the suite.** How you are showing the diff to the TA (a commit,
-`git diff`, a branch), and the totals line (the shipped count plus your pin,
-all green).
+**The diff and the suite.** 
 
-**What did NOT change: behavior and files.** The observable behavior you
-checked is still the same, including anything that surprised you while reading.
-Which files outside the scope are untouched, and how you verified that rather
-than assumed it. If the agent reached outside the directive, say where and what
-you did about it.
+The refactor is commit `52b1cef`, directly after the pin commit `4aa0749`. 
+The diff can be checked with `git show 52b1cef`.
 
-**One thing the agent changed that you had to look at twice.** Something you
-checked line by line before accepting. If there was nothing, say how carefully
-you read the diff.
+Edited 5 code files, all in `src/main/java/edu/cmu/cs214/scheduling/workflow/`:
+
+* `BookingWorkflow.java`: +22 / −212 lines. Removed all four
+  `switch (type)` blocks. It now runs the shared checks and delegates to a
+  handler looked up in an `EnumMap<BookingType, BookingHandler>` built in the
+  constructor.
+* `BookingHandler.java` (new): +32 lines. Package-private interface with
+  `submit`, `cancel`, `priceOf`, `describe`, plus `FACILITIES_CONTACT` and
+  `recipientFor`.
+* `RegularBookingHandler.java` (new): +91 lines. The former `case REGULAR`
+  bodies from all four methods.
+* `RecurringBookingHandler.java` (new): +122 lines. The former `case RECURRING`
+  bodies, plus `MAX_SERIES_WEEKS`.
+* `BlockedBookingHandler.java` (new): +71 lines. The former `case BLOCKED`
+  bodies.
+
+**Code total:** +338 / −212. The same commit also updates `REFACTOR.md`
+(+34 / −4) with the directive section.
+
+**Suite:** `mvn -B test` → `Tests run: 36, Failures: 0, Errors: 0, Skipped: 0`,
+`BUILD SUCCESS`. That is the 35 shipped tests plus the pin
+(`recurringSubmitSkipsAWeekThatStartsWhenAnotherBookingEnds`), all green.
+
+**What did NOT change: behavior and files.** 
+
+*Behavior.* All 36 tests pass after the refactor, without editing any test. The
+pin is among them. The behavior that surprised me while reading is still there:
+RECURRING treats a back-to-back slot as a conflict (`<=`), while REGULAR and
+BLOCKED allow it (`<`). The `<=` now lives in
+`RecurringBookingHandler.submit` (lines 60–61), and REGULAR and BLOCKED keep
+`<` in their own handlers. The three overlap loops were not merged into a
+shared helper. That is the change the pin exists to catch, and it stays green.
+
+*Files.* Nothing outside the scope was touched. I checked this rather than
+assumed it.
+- `git diff --name-only 4aa0749 52b1cef` lists only `REFACTOR.md` and five
+  files in `workflow/`.
+
+The agent did not reach outside the directive. `BookingType` was not given
+behavior, and no test or out-of-scope file changed.
+
+**One thing the agent changed that you had to look at twice.** 
+
+The `recipientFor` move. In the shipped code it was a `private static` helper on
+`BookingWorkflow` (line 293), called from the REGULAR and RECURRING branches of
+`cancel` (lines 191 and 205). The agent moved it, along with
+`FACILITIES_CONTACT`, into the `BookingHandler` interface as a static method
+(`BookingHandler.java:29–30`). The two call sites now read
+`BookingHandler.recipientFor(member)` (`RegularBookingHandler.java:73` and
+`RecurringBookingHandler.java:93`), and the `"Booking cancelled"` call was
+re-wrapped onto a new line.
+
+I checked it line by line because it is the only place in the diff where code
+was rewritten rather than moved verbatim, and no test guards it.
+
+I accepted it for three reasons:
+- The method body is unchanged: `member == null ? FACILITIES_CONTACT : member.getEmail()`.
+- The constant's value is unchanged.
+- The qualified name is required by Java, because static methods on an
+  interface are not inherited by implementing classes, so an unqualified
+  `recipientFor(member)` would not compile.
 
 ### The closing explanation
 
-**Refactor or regenerate?** Argue whether regenerating `BookingWorkflow` from scratch
-would have been the better call, using the lecture's four questions (test
-coverage, code age, spec quality, and reach). Be concrete about this codebase.
+**Refactor or regenerate?** 
 
-**What would flip your answer.** A condition about the artifact, not a feeling.
+Refactoring was the better call.
+
+Two questions decide it:
+- *Spec quality: no one could rebuild this class from the written contract.*
+  The README paragraph and Javadocs never state the per-type overlap rule (`<=`
+  for RECURRING, `<` elsewhere), forward-only series cancellation, series-total
+  `priceOf`, or the notification wording, so a rebuild would replace each of
+  them with an agent's default.
+- *Test coverage: the checks pin counts, not content.* `BookingWorkflowTest`
+  mostly asserts sizes of `getBooked()`, `activeInRoom()`, and the outbox, and
+  only two tests pin full notification text (both REGULAR confirmations), so a
+  regenerated class could pass all 35 shipped tests while changing messages,
+  recipients, and the boundary rule.
+
+Code age (no fixes since generation) and reach (no client or front end, only
+our own tests and `ReportService`) lean toward regenerating, but neither
+outweighs a missing spec and shallow tests.
+
+**What would flip your answer.** 
+
+I would regenerate if the tests pinned the
+content of every observable output for all three types, not just the counts.
+That means the outcome messages, the skipped slots, the full outbox text
+including recipients, and the boundary rule. A regenerated class could then be
+checked against the suite instead of against the old code.
 
 ---
 
