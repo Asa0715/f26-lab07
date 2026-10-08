@@ -8,6 +8,7 @@ import edu.cmu.cs214.scheduling.domain.BookingType;
 import edu.cmu.cs214.scheduling.domain.Member;
 import edu.cmu.cs214.scheduling.domain.MembershipTier;
 import edu.cmu.cs214.scheduling.domain.Room;
+import edu.cmu.cs214.scheduling.domain.TimeSlot;
 import edu.cmu.cs214.scheduling.notify.NotificationHub;
 import edu.cmu.cs214.scheduling.pricing.PriceCalculator;
 
@@ -110,6 +111,20 @@ class BookingWorkflowTest {
         assertEquals(4, store.activeInRoom("C-200").size());
         assertEquals(4, hub.getOutbox().size());
         assertEquals("S-1", outcome.getBooking().getSeriesId());
+    }
+
+    @Test
+    void recurringSubmitSkipsAWeekThatStartsWhenAnotherBookingEnds() {
+        workflow.submit(BookingRequest.regular("C-200", "m-2",
+                LocalDateTime.of(2026, 10, 5, 8, 0), MON_9AM, 2));
+
+        BookingOutcome outcome = workflow.submit(
+                BookingRequest.recurring("C-200", "m-1", MON_9AM, MON_10AM, 3, 6));
+
+        assertTrue(outcome.isAccepted());
+        assertEquals(2, outcome.getBooked().size());
+        assertEquals(List.of(new TimeSlot(MON_9AM, MON_10AM)), outcome.getSkipped());
+        assertEquals(2, outcome.getBooked().get(0).getOccurrenceIndex());
     }
 
     @Test

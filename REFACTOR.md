@@ -13,20 +13,44 @@ Keep it short and specific. Point at methods, call sites, and test names.
 
 ### The pin (write this section before you direct the refactor)
 
-**The pin.** File and test name, plus one sentence naming the method and the
-observable result it pins. Not "recurring bookings work". Green against the
-shipped code, and you did not edit or delete an existing test method to get
-there.
+**The pin.** 
 
-**Why that one, and does a shipped test already cover it?** Of everything
-`BookingWorkflow` does, why is this the behavior worth a test? If something
-shipped comes close, say what your pin adds. If nothing does, say how you
-checked.
+`src/test/java/edu/cmu/cs214/scheduling/workflow/BookingWorkflowTest.java`,
+test `recurringSubmitSkipsAWeekThatStartsWhenAnotherBookingEnds`.
+It pins this behavior of `BookingWorkflow.submit` for a RECURRING request: 
+if a week's slot starts exactly when an existing booking in the same room ends, 
+that week is skipped. The outcome is still accepted, with 2 of 3 weeks booked. 
+`getSkipped()` holds exactly that first slot, and the first booking written 
+has occurrence index 2, not 1. The test is green against the shipped code (36/36). 
+I added one new method and one import, and did not edit or delete any existing test method.
 
-**What a regeneration would do differently here.** Suppose someone
-threw this class away and regenerated it from a one-line description of what a
-booking workflow does. Name the decision that would be made a second time, and
-say which way it would probably go.
+**Why that one, and does a shipped test already cover it?** 
+
+The three branches of `submit` use different comparisons for room overlap. 
+`REGULAR` and `BLOCKED` use strict `<`, so back-to-back slots are allowed. 
+`RECURRING` uses `<=` (`BookingWorkflow.java:121–122`), so back-to-back slots 
+count as a conflict. A refactor that replaces the type switch is likely to pull 
+those three loops into one shared `overlaps()` helper. That would silently change 
+the recurring rule while all 35 shipped tests stay green.
+
+The closest shipped test is `regularSubmitAcceptsASlotThatStartsWhenAnotherEnds`,
+but it pins only the `REGULAR` side of that boundary.
+`recurringSubmitBooksEveryWeekOfAnOpenSeries` books into an empty room, so it
+never skips a week. My pin adds the `RECURRING` side of the boundary and pins
+two side effects: the skipped list and the gap in occurrence numbering.
+
+
+**What a regeneration would do differently here.** 
+
+The decision is what "overlap" means at a boundary, and whether it is the same 
+for every booking type. A one-line spec ("members book rooms once or weekly; 
+staff can block rooms") does not mention boundaries. A regenerated class would 
+almost certainly write a single overlap check with half-open intervals 
+(a.start < b.end && b.start < a.end), which matches TimeSlot's own Javadoc 
+("inclusive start, exclusive end"). That check would be used for all three types.
+A weekly series that starts right when another booking ends would then book every 
+week, with an empty skipped list and occurrence indexes 1..n, and this test 
+would go red.
 
 ### The directive
 
