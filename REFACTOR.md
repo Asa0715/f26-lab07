@@ -196,38 +196,134 @@ Read `notify/`. It works and the outbox tests pass.
 
 ### The patterns present
 
-List every design pattern you can name in that package. For each one, the class
-or classes that carry it.
+- **Strategy.** `NotificationStrategy` (interface) and `EmailNotificationStrategy`
+  (its only implementation). `NotificationHub` holds a strategy and calls
+  `render(message)` to turn a message into text.
+- **Observer (publish/subscribe).** `NotificationHub` is the subject, with
+  `subscribe()` and `publish()`. `NotificationSubscriber` is the observer
+  interface, and `OutboxSubscriber` is its only implementation, which appends
+  to `Outbox`.
+- **Factory.** `NotifierFactory.createStrategy()` decides which
+  `NotificationStrategy` the hub gets. It always returns a new
+  `EmailNotificationStrategy`.
 
 ### The problem each one solves
 
-For each pattern you listed, what would have to be true about the requirements
-for that pattern to be the right call? One sentence each, not in terms of
-"flexibility".
+- **Strategy.** The same message must be rendered in more than one format,
+  such as email for one member and SMS for another, and which format applies
+  is chosen at runtime by configuration or by the recipient.
+- **Observer.** One published notification must reach several independent
+  destinations, such as the outbox, an audit log, and a Slack channel, and the
+  set of destinations changes without the publisher being edited.
+- **Factory.** Which `NotificationStrategy` to build depends on a condition
+  known only at runtime, such as a config setting or the recipient's preferred
+  channel, and that choice should be made in one place instead of at every
+  call site.
 
 ### Which of those problems exist here
 
-For each pattern, does the problem it solves exist in this codebase? Point at
-the code that settles it.
+- **Strategy: no.** There is one format and nothing can choose another.
+  - `EmailNotificationStrategy` is the only class that implements
+    `NotificationStrategy`.
+  - `NotificationHub`'s constructor hard-wires it
+    (`this.strategy = NotifierFactory.getInstance().createStrategy();`,
+    `NotificationHub.java:22`).
+  - No constructor parameter or setter lets a caller supply a different
+    strategy.
+- **Observer: no.** There is one destination and nothing adds another.
+  - `OutboxSubscriber` is the only class that implements
+    `NotificationSubscriber`.
+  - The only call to `subscribe()` anywhere in `src/` is in the hub's own
+    constructor (`NotificationHub.java:23`). `BookingWorkflow` never
+    subscribes anything.
+  - The test `hubDeliversToItsOneSubscriber` asserts that the count is 1.
+- **Factory: no.** There is no runtime condition to decide on.
+  - `NotifierFactory.createStrategy()` (`NotifierFactory.java:19–20`) takes no
+    arguments and contains no branch. It always returns
+    `new EmailNotificationStrategy()`.
+  - Its only caller is `NotificationHub.java:22`.
 
 ### The simpler structure
 
-**Your proposal.** What replaces `notify/`. Sketch the classes and the one
-method that matters.
+**Your proposal.** 
 
-**What stays the same.** The tested behavior it must still produce, named
-precisely enough that a reader can check it against the shipped tests.
+`notify/` shrinks to three classes:
+- `NotificationMessage`, unchanged.
+- `Outbox`, unchanged.
+- `NotificationHub`, which renders the message itself and appends it to the
+  outbox.
 
-**What you would keep, if anything.** If you would keep one interface, say
-which and why. "None of it" is a fine answer if you can defend it.
+`NotificationStrategy`, `EmailNotificationStrategy`, `NotifierFactory`,
+`NotificationSubscriber`, and `OutboxSubscriber` are deleted. The one method
+that matters:
+
+    public class NotificationHub {
+        private final Outbox outbox;
+
+        public NotificationHub() { this(new Outbox()); }
+        public NotificationHub(Outbox outbox) { /* null check */ this.outbox = outbox; }
+
+        public void publish(NotificationMessage message) {
+            outbox.append("To: " + message.recipient()
+                    + " | Subject: " + message.subject()
+                    + " | " + message.body());
+        }
+
+        public Outbox getOutbox() { return outbox; }
+    }
+
+`BookingWorkflow` does not change, because it only calls `hub.publish(...)`.
+
+**What stays the same.** 
+
+Every message `publish` receives lands in the outbox
+as one line, `"To: <recipient> | Subject: <subject> | <body>"`, in publish
+order. That is what `publishedMessageLandsInTheOutboxFullyRendered`,
+`aConfirmationFromTheWorkflowReachesTheOutbox`, and the
+`hub.getOutbox().size()` checks in `BookingWorkflowTest` pin. The
+`NotificationHub` constructors and `getOutbox()` keep their signatures, so
+those tests run unchanged. The two tests that only check structure,
+`hubDeliversToItsOneSubscriber` and `factoryHandsBackTheSameInstance`, are
+deleted along with the layers they check.
+
+**What you would keep, if anything.** None of the interfaces.
+
+`NotificationStrategy` and `NotificationSubscriber` each have one
+implementation and no second caller, so they add a hop without separating
+anything. If a second format or destination arrives, extracting the interface
+from `NotificationHub` is a small, mechanical refactor that the same tests can
+verify. Keeping it now means paying for it before we know its shape.
+`NotificationMessage` and `Outbox` stay, but they are data and storage, not
+pattern layers.
 
 ### What would bring each layer back
 
-For at least two of the layers you would remove, what requirement, if it
-arrived next sprint, would make that layer the right structure? Be specific
-about the requirement, not about the pattern.
+- **`NotificationStrategy` (Strategy).** Members can choose to receive
+  confirmations by email or by SMS, and the SMS text must fit in limited
+  characters with no `To:` / `Subject:` header. Then the hub needs to render
+  the same `NotificationMessage` two different ways, picked per recipient.
+- **`NotificationSubscriber` (Observer).** Facilities asks that every "Room
+  blocked" and "Block released" notice also be posted to their Slack channel,
+  and compliance asks that every notification be written to an audit log. Then
+  one `publish` must reach three destinations, and new ones can be added
+  without editing `NotificationHub` or `BookingWorkflow`.
+- **`NotifierFactory` (Factory).** The channel is chosen at startup from
+  deployment config, for example email in production and a console printer in
+  local dev. Then deciding which strategy to build belongs in one place
+  instead of in the hub's constructor.
 
-**Misuse or anti-pattern?** Say which this is and why the distinction matters.
+**Misuse or anti-pattern?** This is misuse. 
+
+Strategy, Observer, and Factory are sound solutions, but here they were applied\
+to problems this codebase does not have: one format, one destination, 
+and no runtime choice. 
+
+An **anti-pattern** would be a structure that is harmful whatever 
+the requirements are. The distinction matters because it changes the fix 
+and the follow-up. Misuse means removing the layers now and bringing them back 
+when one of the requirements above actually arrives. Calling it an anti-pattern 
+would wrongly suggest these patterns should never be used, and would leave 
+the next developer without a clear trigger for when they become the right call.
 
 ---
 
