@@ -334,4 +334,11 @@ Read `pricing/`. Not coded, one sentence.
 **The pattern.** Which one fits `PriceCalculator`, and the problem that makes
 it fit. Name the problem.
 
-**Would you apply it today?** Yes or no, one line, with the reason.
+Strategy, with each pricing rule as a `PricingRule`. The
+problem is that four independent, ordered price adjustments are hard-coded in
+one `price()` method, so adding or reordering a rule means editing that method.
+
+**Would you apply it today?** 
+
+No. The four rules are fixed and already tested,
+and no requirement asks for a new one.
